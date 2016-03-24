@@ -35,6 +35,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
+
 import com.sweetpricing.analytics.integrations.AliasPayload;
 import com.sweetpricing.analytics.integrations.BasePayload;
 import com.sweetpricing.analytics.integrations.GroupPayload;
@@ -45,24 +46,20 @@ import com.sweetpricing.analytics.integrations.ScreenPayload;
 import com.sweetpricing.analytics.integrations.TrackPayload;
 import com.sweetpricing.analytics.internal.Utils;
 import com.sweetpricing.analytics.internal.Utils.AnalyticsNetworkExecutorService;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static com.sweetpricing.analytics.internal.Utils.THREAD_PREFIX;
-import static com.sweetpricing.analytics.internal.Utils.buffer;
-import static com.sweetpricing.analytics.internal.Utils.closeQuietly;
 import static com.sweetpricing.analytics.internal.Utils.getResourceString;
 import static com.sweetpricing.analytics.internal.Utils.hasPermission;
-import static com.sweetpricing.analytics.internal.Utils.isConnected;
 import static com.sweetpricing.analytics.internal.Utils.isNullOrEmpty;
 
 /**
@@ -85,7 +82,6 @@ import static com.sweetpricing.analytics.internal.Utils.isNullOrEmpty;
  * @see <a href="https://Segment/">Segment</a>
  */
 public class Analytics {
-  private static final String ANALYTICS_THREAD_NAME = THREAD_PREFIX + "Analytics";
   static final Handler HANDLER = new Handler(Looper.getMainLooper()) {
     @Override public void handleMessage(Message msg) {
       throw new AssertionError("Unknown handler message received: " + msg.what);
@@ -106,7 +102,6 @@ public class Analytics {
   final String tag;
   final Client client;
   final Cartographer cartographer;
-  private final ProjectSettings.Cache projectSettingsCache;
   ProjectSettings projectSettings; // todo: make final (non-final for testing).
   private final String writeKey;
   final int flushQueueSize;
@@ -176,7 +171,7 @@ public class Analytics {
   Analytics(Application application, ExecutorService networkExecutor, Stats stats,
       Traits.Cache traitsCache, AnalyticsContext analyticsContext, Options defaultOptions,
       Logger logger, String tag, List<Integration.Factory> factories, Client client,
-      Cartographer cartographer, ProjectSettings.Cache projectSettingsCache, String writeKey,
+      Cartographer cartographer, ProjectSettings.Cache deprecated, String writeKey,
       int flushQueueSize, long flushIntervalInMillis, final ExecutorService analyticsExecutor) {
     this.application = application;
     this.networkExecutor = networkExecutor;
@@ -188,7 +183,6 @@ public class Analytics {
     this.tag = tag;
     this.client = client;
     this.cartographer = cartographer;
-    this.projectSettingsCache = projectSettingsCache;
     this.writeKey = writeKey;
     this.flushQueueSize = flushQueueSize;
     this.flushIntervalInMillis = flushIntervalInMillis;
@@ -197,20 +191,10 @@ public class Analytics {
 
     analyticsExecutor.submit(new Runnable() {
       @Override public void run() {
-        projectSettings = getSettings();
-        if (isNullOrEmpty(projectSettings)) {
-          // Backup mode — Enable just the Segment integration.
-          // {
-          //   integrations: {
-          //     Segment.io: {
-          //       apiKey: "{writeKey}"
-          //     }
-          //   }
-          // }
-          projectSettings = ProjectSettings.create(new ValueMap() //
-              .putValue("integrations", new ValueMap().putValue("Sweetpricing",
-                  new ValueMap().putValue("apiKey", Analytics.this.writeKey))));
-        }
+        projectSettings = ProjectSettings.create(new ValueMap()
+            .putValue("integrations", new ValueMap().putValue("Sweetpricing",
+                    new ValueMap().putValue("apiKey", Analytics.this.writeKey))));
+
         HANDLER.post(new Runnable() {
           @Override public void run() {
             performInitializeIntegrations(projectSettings);
@@ -928,9 +912,6 @@ public class Analytics {
       final Cartographer cartographer = Cartographer.INSTANCE;
       final Client client = new Client(application, writeKey, connectionFactory);
 
-      ProjectSettings.Cache projectSettingsCache =
-          new ProjectSettings.Cache(application, cartographer, tag);
-
       Traits.Cache traitsCache = new Traits.Cache(application, cartographer, tag);
       if (!traitsCache.isSet() || traitsCache.get() == null) {
         Traits traits = Traits.create();
@@ -946,54 +927,9 @@ public class Analytics {
 
       return new Analytics(application, networkExecutor, stats, traitsCache, analyticsContext,
           defaultOptions, Logger.with(logLevel), tag, factories, client, cartographer,
-          projectSettingsCache, writeKey, flushQueueSize, flushIntervalInMillis,
+          null, writeKey, flushQueueSize, flushIntervalInMillis,
           Executors.newSingleThreadExecutor());
     }
-  }
-
-  // Handler Logic.
-  private static final long SETTINGS_REFRESH_INTERVAL = 1000 * 60 * 60 * 24; // 24 hours
-  private static final long SETTINGS_RETRY_INTERVAL = 1000 * 60; // 1 minute
-
-  private ProjectSettings downloadSettings() {
-    try {
-      ProjectSettings projectSettings = networkExecutor.submit(new Callable<ProjectSettings>() {
-        @Override public ProjectSettings call() throws Exception {
-          Client.Connection connection = null;
-          try {
-            connection = client.fetchSettings();
-            Map<String, Object> map = cartographer.fromJson(buffer(connection.is));
-            return ProjectSettings.create(map);
-          } finally {
-            closeQuietly(connection);
-          }
-        }
-      }).get();
-      projectSettingsCache.set(projectSettings);
-      return projectSettings;
-    } catch (InterruptedException e) {
-      logger.error(e, "Thread interrupted while fetching settings.");
-    } catch (ExecutionException e) {
-      logger.error(e, "Unable to fetch settings. Retrying in %s ms.", SETTINGS_RETRY_INTERVAL);
-    }
-    return null;
-  }
-
-  private ProjectSettings getSettings() {
-    ProjectSettings settings = projectSettingsCache.get();
-
-    boolean update = false;
-    if (isNullOrEmpty(settings)) {
-      update = true;
-    } else if (settings.timestamp() + SETTINGS_REFRESH_INTERVAL < System.currentTimeMillis()) {
-      update = true;
-    }
-
-    if (update && isConnected(application)) {
-      settings = downloadSettings();
-    }
-
-    return settings;
   }
 
   void performInitializeIntegrations(ProjectSettings projectSettings) {

@@ -86,16 +86,6 @@ class Client {
     return createPostConnection(connection);
   }
 
-  Connection fetchSettings() throws IOException {
-    HttpURLConnection connection = connectionFactory.projectSettings(writeKey);
-    int responseCode = connection.getResponseCode();
-    if (responseCode != HTTP_OK) {
-      connection.disconnect();
-      throw new IOException("HTTP " + responseCode + ": " + connection.getResponseMessage());
-    }
-    return createGetConnection(connection);
-  }
-
   /** Represents an exception during uploading events that should not be retried. */
   static class UploadException extends IOException {
     final int responseCode;

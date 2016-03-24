@@ -18,20 +18,12 @@ public class ConnectionFactory {
     return "Basic " + Base64.encodeToString((writeKey + ":").getBytes(), Base64.NO_WRAP);
   }
 
-  /** Return a {@link HttpURLConnection} that reads JSON formatted project settings. */
-  public HttpURLConnection projectSettings(String writeKey) throws IOException {
-    HttpURLConnection connection =
-        openConnection("https://cdn.sweetpricing.com/v1/projects/" + writeKey + "/settings");
-    connection.setRequestProperty("Content-Type", "application/json");
-    return connection;
-  }
-
   /**
    * Return a {@link HttpURLConnection} that writes batched payloads to {@code
    * https://api.segment.io/v1/import}.
    */
   public HttpURLConnection upload(String writeKey) throws IOException {
-    HttpURLConnection connection = openConnection("https://api.sweetpricing.com/v1/import");
+    HttpURLConnection connection = openConnection("https://api.sweetpricing.com/v1/eventCollections");
     connection.setRequestProperty("Content-Type", "application/json");
     connection.setRequestProperty("Authorization", authorizationHeader(writeKey));
     connection.setDoOutput(true);
@@ -40,8 +32,7 @@ public class ConnectionFactory {
   }
 
   /**
-   * Configures defaults for connections opened with both {@link #upload(String)} and {@link
-   * #projectSettings(String)}.
+   * Configures defaults for connections opened with {@link #upload(String)}
    */
   protected HttpURLConnection openConnection(String url) throws IOException {
     HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();

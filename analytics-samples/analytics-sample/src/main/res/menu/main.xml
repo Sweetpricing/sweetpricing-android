@@ -2,6 +2,7 @@
   ~ The MIT License (MIT)
   ~
   ~ Copyright (c) 2014 Segment, Inc.
+  * Modified work Copyright (c) 2016 Sweet Pricing Ltd.
   ~
   ~ Permission is hereby granted, free of charge, to any person obtaining a copy
   ~ of this software and associated documentation files (the "Software"), to deal
@@ -25,7 +26,7 @@
 <menu
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
-    tools:context="com.segment.analytics.sample.MainActivity">
+    tools:context="com.sweetpricing.analytics.sample.MainActivity">
 
   <item android:id="@+id/action_view_docs"
       android:title="@string/action_view_docs"

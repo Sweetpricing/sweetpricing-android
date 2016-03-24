@@ -2,6 +2,7 @@
   ~ The MIT License (MIT)
   ~
   ~ Copyright (c) 2014 Segment, Inc.
+  * Modified work Copyright (c) 2016 Sweet Pricing Ltd.
   ~
   ~ Permission is hereby granted, free of charge, to any person obtaining a copy
   ~ of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +25,7 @@
 
 <resources>
 
-  <string name="app_name">Segment Sample</string>
+  <string name="app_name">Sweetpricing Sample</string>
   <string name="action_view_docs">Docs</string>
   <string name="no_browser_available">No browser to open link</string>
   <string name="track_button_a">Track Button A</string>

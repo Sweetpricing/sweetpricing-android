@@ -3,6 +3,7 @@
   ~ The MIT License (MIT)
   ~
   ~ Copyright (c) 2014 Segment, Inc.
+  * Modified work Copyright (c) 2016 Sweet Pricing Ltd.
   ~
   ~ Permission is hereby granted, free of charge, to any person obtaining a copy
   ~ of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +25,7 @@
   -->
 
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.segment.analytics.sample">
+    package="com.sweetpricing.analytics.sample">
 
   <!-- Required for internet. -->
   <uses-permission android:name="android.permission.INTERNET"/>
@@ -60,7 +61,7 @@
     </activity>
 
     <service
-        android:name="com.segment.analytics.PhoneAnalyticsListenerService">
+        android:name="com.sweetpricing.analytics.PhoneAnalyticsListenerService">
       <intent-filter>
         <action android:name="com.google.android.gms.wearable.BIND_LISTENER"/>
       </intent-filter>

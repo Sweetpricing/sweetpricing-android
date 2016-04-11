@@ -25,6 +25,6 @@
   -->
 
 <manifest
-    package="com.sweetpricing.analytics.core.tests">
+    package="com.sweetpricing.dynamicpricing.core.tests">
   <application/>
 </manifest>

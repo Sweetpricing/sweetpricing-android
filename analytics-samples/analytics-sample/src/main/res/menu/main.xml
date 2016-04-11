@@ -26,7 +26,7 @@
 <menu
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
-    tools:context="com.sweetpricing.analytics.sample.MainActivity">
+    tools:context="com.sweetpricing.dynamicpricing.sample.MainActivity">
 
   <item android:id="@+id/action_view_docs"
       android:title="@string/action_view_docs"

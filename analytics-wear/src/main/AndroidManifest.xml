@@ -24,6 +24,6 @@
   ~ SOFTWARE.
   -->
 
-<manifest package="com.sweetpricing.analytics.wear">
+<manifest package="com.sweetpricing.dynamicpricing.wear">
   <application/>
 </manifest>

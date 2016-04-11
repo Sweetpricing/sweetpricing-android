@@ -25,12 +25,14 @@
   -->
 
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.sweetpricing.analytics.sample">
+    package="com.sweetpricing.dynamicpricing.sample">
 
   <!-- Required for internet. -->
   <uses-permission android:name="android.permission.INTERNET"/>
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
   <uses-permission android:name="android.permission.WAKE_LOCK"/>
+
+  <uses-permission android:name="com.android.vending.BILLING" />
 
   <!-- Allow you to get LOGCAT information when a crash occurs. -->
   <uses-permission android:name="android.permission.READ_LOGS"/>
@@ -61,7 +63,7 @@
     </activity>
 
     <service
-        android:name="com.sweetpricing.analytics.PhoneAnalyticsListenerService">
+        android:name="com.sweetpricing.dynamicpricing.PhoneAnalyticsListenerService">
       <intent-filter>
         <action android:name="com.google.android.gms.wearable.BIND_LISTENER"/>
       </intent-filter>

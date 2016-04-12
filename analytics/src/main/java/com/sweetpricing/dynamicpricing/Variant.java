@@ -31,6 +31,9 @@ import static java.util.Collections.unmodifiableMap;
 
 public class Variant extends ValueMap {
 
+    private static final String ID_KEY = "id";
+    private static final String SKUS_KEY = "skus";
+
     static Variant create(Map<String, Object> map) {
         return new Variant(map);
     }
@@ -39,10 +42,15 @@ public class Variant extends ValueMap {
         super(unmodifiableMap(map));
     }
 
+    public int getId() {
+        return getInt(ID_KEY, 0);
+    }
+
     public String getProductSku(int productId, String defaultValue) {
         String productIdStr = Integer.toString(productId);
 
-        String sku = getString(productIdStr);
+        ValueMap skusValueMap = getValueMap(SKUS_KEY);
+        String sku = skusValueMap.getString(productIdStr);
 
         if (sku == null) {
             sku = defaultValue;

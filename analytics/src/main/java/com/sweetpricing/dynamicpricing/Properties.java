@@ -35,6 +35,7 @@ import java.util.Map;
  */
 public class Properties extends ValueMap {
   private static final String PRODUCT_ID_KEY = "productId";
+  private static final String VARIANT_ID_KEY = "variantId";
 
   public Properties() {
   }
@@ -62,5 +63,13 @@ public class Properties extends ValueMap {
 
   public String productId() {
     return getString(PRODUCT_ID_KEY);
+  }
+
+  public Properties putVariantId(int variantId) {
+    return putValue(VARIANT_ID_KEY, variantId);
+  }
+
+  public int variantId() {
+    return getInt(VARIANT_ID_KEY, 0);
   }
 }

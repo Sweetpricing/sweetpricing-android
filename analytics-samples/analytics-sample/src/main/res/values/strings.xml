@@ -28,7 +28,7 @@
   <string name="app_name">Sweetpricing Sample</string>
   <string name="action_view_docs">Docs</string>
   <string name="no_browser_available">No browser to open link</string>
-  <string name="get_sku">Get SKU</string>
+  <string name="get_sku">Get SKU &amp; Track View</string>
   <string name="track_button_purchase">Track Purchase</string>
   <string name="product_id_hint">Type in product ID to track</string>
   <string name="flush">Flush Events</string>
@@ -38,5 +38,6 @@
   <string name="identify_user_id">Type in an ID to recognize the user</string>
   <string name="update_stats">Update Stats</string>
   <string name="id_required">Id should not be blank or empty</string>
+  <string name="track_button_event">Track Arbitrary Event</string>
 
 </resources>

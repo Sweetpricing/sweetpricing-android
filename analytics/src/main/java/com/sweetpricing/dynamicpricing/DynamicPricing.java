@@ -353,6 +353,13 @@ public class DynamicPricing {
     track("Purchase", props);
   }
 
+  public void trackViewVariant(Variant variant) {
+    Properties props = new Properties();
+    props.putVariantId(variant.getId());
+
+    track("View Variant", props);
+  }
+
   /**
    * The track method is how you record any actions your users perform. Each action is known by a
    * name, like 'Purchased a T-Shirt'. You can also record properties specific to those actions.

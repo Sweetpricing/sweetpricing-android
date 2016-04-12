@@ -84,6 +84,13 @@ public class MainActivity extends Activity {
         }
       }
     });
+
+    findViewById(R.id.action_track_event).setOnClickListener(new View.OnClickListener() {
+      @Override
+      public void onClick(View v) {
+        DynamicPricing.with(MainActivity.this).track("Logged In");
+      }
+    });
   }
 
   private void updateProductSku() {
@@ -102,6 +109,8 @@ public class MainActivity extends Activity {
         // to fall back on...
         String sku = variant.getProductSku(PRODUCT_ID, PRODUCT_DEFAULT_SKU);
         ((TextView) findViewById(R.id.current_sku)).setText(sku);
+
+        DynamicPricing.with(MainActivity.this).trackViewVariant(variant);
       }
     };
 

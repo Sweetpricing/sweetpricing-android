@@ -62,6 +62,12 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"/>
 
+      <Button
+          android:id="@+id/action_track_event"
+          android:text="@string/track_button_event"
+          android:layout_width="match_parent"
+          android:layout_height="wrap_content"/>
+
   </LinearLayout>
 
 </ScrollView>

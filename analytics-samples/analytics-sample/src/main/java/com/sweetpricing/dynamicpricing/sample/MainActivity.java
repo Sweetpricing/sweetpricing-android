@@ -31,15 +31,26 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
 import android.text.TextUtils;
+import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.EditText;
+import android.widget.TextView;
 import android.widget.Toast;
 import com.sweetpricing.dynamicpricing.DynamicPricing;
 import com.sweetpricing.dynamicpricing.FetchVariantTask;
+import com.sweetpricing.dynamicpricing.Variant;
 
 public class MainActivity extends Activity {
+  /**
+   * The following IDs are the product group ID and product ID configured
+   * within Sweet Pricing.
+   */
+  private static final int PRODUCT_GROUP_ID = 4;
+  private static final int PRODUCT_ID = 8;
+  private static final String PRODUCT_DEFAULT_SKU = "android.test.purchased";
+
   /** Returns true if the string is null, or empty (when trimmed). */
   public static boolean isNullOrEmpty(String text) {
     return TextUtils.isEmpty(text) || text.trim().length() == 0;
@@ -54,22 +65,17 @@ public class MainActivity extends Activity {
 
   private void initViews() {
     findViewById(R.id.action_get_sku).setOnClickListener(new View.OnClickListener() {
-      @Override public void onClick(View v) {
-        FetchVariantTask fetchVariantTask = new FetchVariantTask(DynamicPricing.with(MainActivity.this)) {
-          @Override
-          protected void onPostExecute(String s) {
-            Toast.makeText(MainActivity.this, "Got variant", Toast.LENGTH_LONG).show();
-          }
-        };
-
-        fetchVariantTask.execute(5);
+      @Override
+      public void onClick(View v) {
+        updateProductSku();
       }
     });
 
     findViewById(R.id.action_track_purchase).setOnClickListener(new View.OnClickListener() {
-      @Override public void onClick(View v) {
+      @Override
+      public void onClick(View v) {
         String productId =
-            ((EditText) findViewById(R.id.action_track_purchase_product_id)).getText().toString();
+                ((EditText) findViewById(R.id.action_track_purchase_product_id)).getText().toString();
 
         if (isNullOrEmpty(productId)) {
           Toast.makeText(MainActivity.this, R.string.product_id_required, Toast.LENGTH_LONG).show();
@@ -78,6 +84,30 @@ public class MainActivity extends Activity {
         }
       }
     });
+  }
+
+  private void updateProductSku() {
+    // When you need to obtain a pricepoint SKU for a particular product, you must create a
+    // new FetchVariantTask...
+    FetchVariantTask fetchVariantTask = new FetchVariantTask(DynamicPricing.with(MainActivity.this)) {
+      @Override
+      protected void onPostExecute(Variant variant) {
+        // if there was an error, e will be an Exception
+        if (e != null) {
+          Log.e("MainActivity", "Error getting variant", e);
+        }
+
+        // even if there is an error, a variant object is returned
+        // if there was a problem obtaining the data, you should specify a default SKU
+        // to fall back on...
+        String sku = variant.getProductSku(PRODUCT_ID, PRODUCT_DEFAULT_SKU);
+        ((TextView) findViewById(R.id.current_sku)).setText(sku);
+      }
+    };
+
+    // ... Execute this task with the product **GROUP** you are displaying. This will fetch
+    // all the pricepoint SKUs within this group for the current user's segment.
+    fetchVariantTask.execute(PRODUCT_GROUP_ID);
   }
 
   @Override public boolean onCreateOptionsMenu(Menu menu) {

@@ -23,7 +23,7 @@ public class ConnectionFactory {
    * https://api.segment.io/v1/import}.
    */
   public HttpURLConnection upload(String writeKey) throws IOException {
-    HttpURLConnection connection = openConnection("https://api.sweetpricing.com/v1/events");
+    HttpURLConnection connection = openConnection("http://192.168.1.138:4000/v1/events");
     connection.setRequestProperty("Content-Type", "application/json");
     connection.setRequestProperty("Authorization", authorizationHeader(writeKey));
     connection.setDoOutput(true);
@@ -34,7 +34,7 @@ public class ConnectionFactory {
   /** Return a {@link HttpURLConnection} that reads JSON formatted price variant settings. */
   public HttpURLConnection variant(String writeKey) throws IOException {
     HttpURLConnection connection =
-            openConnection("https://api.sweetpricing.com/v1/variant");
+            openConnection("http://192.168.1.138:4000/v1/variant");
     connection.setRequestProperty("Content-Type", "application/json");
     connection.setRequestProperty("Authorization", authorizationHeader(writeKey));
     connection.setDoOutput(true);

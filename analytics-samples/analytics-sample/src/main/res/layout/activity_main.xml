@@ -45,6 +45,11 @@
           android:layout_width="match_parent"
           android:layout_height="wrap_content" />
 
+      <TextView
+          android:layout_width="match_parent"
+          android:layout_height="wrap_content"
+          android:id="@+id/current_sku" />
+
     <EditText
         android:id="@+id/action_track_purchase_product_id"
         android:hint="@string/product_id_hint"

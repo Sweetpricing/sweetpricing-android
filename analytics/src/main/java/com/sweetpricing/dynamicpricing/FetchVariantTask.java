@@ -1,26 +1,34 @@
 package com.sweetpricing.dynamicpricing;
 
 import android.os.AsyncTask;
+import android.util.Log;
 
 import com.sweetpricing.dynamicpricing.Client;
 import com.sweetpricing.dynamicpricing.integrations.VariantRequestPayload;
 
+import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
+import java.util.Map;
 
+import static com.sweetpricing.dynamicpricing.internal.Utils.buffer;
 import static com.sweetpricing.dynamicpricing.internal.Utils.closeQuietly;
 
-public class FetchVariantTask extends AsyncTask<Integer, Void, String> {
+public class FetchVariantTask extends AsyncTask<Integer, Void, Variant> {
     final Cartographer cartographer = Cartographer.INSTANCE;
     private final DynamicPricing dynamicPricing;
+    protected Exception e = null;
+    private Variant defaultVariant = Variant.create(new ValueMap());
 
     public FetchVariantTask(DynamicPricing dynamicPricing) {
         this.dynamicPricing = dynamicPricing;
     }
 
     @Override
-    protected String doInBackground(Integer... params) {
+    protected Variant doInBackground(Integer... params) {
         int productGroupId = params[0];
         Client client = dynamicPricing.getClient();
 
@@ -31,7 +39,8 @@ public class FetchVariantTask extends AsyncTask<Integer, Void, String> {
         try {
             payloadJson = cartographer.toJson(payload);
         } catch (IOException e) {
-            e.printStackTrace();
+            this.e = e;
+            return defaultVariant;
         }
 
         Client.Connection connection = null;
@@ -45,19 +54,24 @@ public class FetchVariantTask extends AsyncTask<Integer, Void, String> {
             bufferedWriter.write(payloadJson);
             bufferedWriter.close();
 
+            InputStream is = connection.connection.getInputStream();
+            Map<String, Object> respMap = cartographer.fromJson(buffer(is));
+            is.close();
+
             try {
                 // Upload the payloads.
                 connection.close();
             } catch (Client.UploadException e) {
-                // Simply log and proceed to remove the rejected payloads from the queue
-                return null;
+                this.e = e;
+                return defaultVariant;
             }
+
+            return Variant.create(respMap);
         } catch (IOException e) {
-            e.printStackTrace();
+            this.e = e;
+            return defaultVariant;
         } finally {
             closeQuietly(connection);
         }
-
-        return null;
     }
 }

@@ -19,15 +19,5 @@ public class SampleApp extends Application {
 
     // Set the initialized instance as a globally accessible instance.
     DynamicPricing.setSingletonInstance(builder.build());
-
-    // Now anytime you call DynamicPricing.with, the custom instance will be returned.
-    DynamicPricing.with(this).track("App Launched");
-
-    // If you need to listen for
-    DynamicPricing.with(this).onIntegrationReady("Sweetpricing", new DynamicPricing.Callback() {
-      @Override public void onReady(Object instance) {
-        Toast.makeText(SampleApp.this, "Sweetpricing integration!", Toast.LENGTH_LONG).show();
-      }
-    });
   }
 }

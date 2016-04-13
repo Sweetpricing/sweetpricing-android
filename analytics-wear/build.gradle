@@ -13,5 +13,3 @@ checkstyle {
   configFile rootProject.file('gradle/checkstyle.xml')
   showViolations true
 }
-
-apply from: rootProject.file('gradle/gradle-mvn-push.gradle')

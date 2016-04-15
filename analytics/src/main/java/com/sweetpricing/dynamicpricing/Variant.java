@@ -47,10 +47,14 @@ public class Variant extends ValueMap {
     }
 
     public String getProductSku(int productId, String defaultValue) {
+        String sku = null;
         String productIdStr = Integer.toString(productId);
 
         ValueMap skusValueMap = getValueMap(SKUS_KEY);
-        String sku = skusValueMap.getString(productIdStr);
+
+        if (skusValueMap != null) {
+            sku = skusValueMap.getString(productIdStr);
+        }
 
         if (sku == null) {
             sku = defaultValue;

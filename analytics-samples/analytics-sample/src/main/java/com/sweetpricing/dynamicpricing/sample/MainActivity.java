@@ -40,16 +40,22 @@ import android.widget.TextView;
 import android.widget.Toast;
 import com.sweetpricing.dynamicpricing.DynamicPricing;
 import com.sweetpricing.dynamicpricing.FetchVariantTask;
+import com.sweetpricing.dynamicpricing.Properties;
 import com.sweetpricing.dynamicpricing.Variant;
+
+import java.util.ArrayList;
+import java.util.List;
 
 public class MainActivity extends Activity {
   /**
    * The following IDs are the product group ID and product ID configured
    * within Sweet Pricing.
    */
-  private static final int PRODUCT_GROUP_ID = 4;
-  private static final int PRODUCT_ID = 8;
-  private static final String PRODUCT_DEFAULT_SKU = "android.test.purchased";
+  private static final int SP_STORE_ID = 3;
+  private static final int SP_1MONTH_ID = 7;
+  private static final int SP_1YEAR_ID = 8;
+  private static final String DEFAULT_1MONTH = "com.sweetpricing.default.1month";
+  private static final String DEFAULT_1YEAR = "com.sweetpricing.default.1year";
 
   /** Returns true if the string is null, or empty (when trimmed). */
   public static boolean isNullOrEmpty(String text) {
@@ -107,16 +113,31 @@ public class MainActivity extends Activity {
         // even if there is an error, a variant object is returned
         // if there was a problem obtaining the data, you should specify a default SKU
         // to fall back on...
-        String sku = variant.getProductSku(PRODUCT_ID, PRODUCT_DEFAULT_SKU);
-        ((TextView) findViewById(R.id.current_sku)).setText(sku);
+        String google1MonthId = variant.getProductSku(SP_1MONTH_ID, DEFAULT_1MONTH);
+        String google1YearId = variant.getProductSku(SP_1YEAR_ID, DEFAULT_1YEAR);
+        ((TextView) findViewById(R.id.current_sku_1month)).setText(google1MonthId);
+        ((TextView) findViewById(R.id.current_sku_1year)).setText(google1YearId);
 
-        DynamicPricing.with(MainActivity.this).trackViewVariant(variant);
+        List<Properties> productsList = new ArrayList<>();
+        productsList.add(new Properties()
+                .putValue("price", 7.99)
+                .putValue("currencyCode", "USD")
+                .putValue("productId", google1MonthId));
+        productsList.add(new Properties()
+                .putValue("price", 29.99)
+                .putValue("currencyCode", "USD")
+                .putValue("productId", google1YearId));
+
+        DynamicPricing.with(MainActivity.this).trackViewStore(
+                variant,
+                productsList
+        );
       }
     };
 
     // ... Execute this task with the product **GROUP** you are displaying. This will fetch
     // all the pricepoint SKUs within this group for the current user's segment.
-    fetchVariantTask.execute(PRODUCT_GROUP_ID);
+    fetchVariantTask.execute(SP_STORE_ID);
   }
 
   @Override public boolean onCreateOptionsMenu(Menu menu) {

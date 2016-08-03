@@ -353,9 +353,10 @@ public class DynamicPricing {
     track("Purchase", props);
   }
 
-  public void trackViewVariant(Variant variant) {
+  public void trackViewStore(Variant variant, List<Properties> products) {
     Properties props = new Properties();
     props.putVariantId(variant.getId());
+    props.put("products", products);
 
     track("View Variant", props);
   }

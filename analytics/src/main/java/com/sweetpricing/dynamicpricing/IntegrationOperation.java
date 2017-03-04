@@ -5,6 +5,7 @@ import android.os.Bundle;
 
 import com.sweetpricing.dynamicpricing.integrations.IdentifyPayload;
 import com.sweetpricing.dynamicpricing.integrations.Integration;
+import com.sweetpricing.dynamicpricing.integrations.ScreenPayload;
 import com.sweetpricing.dynamicpricing.integrations.TrackPayload;
 
 import static com.sweetpricing.dynamicpricing.Options.ALL_INTEGRATIONS_KEY;
@@ -191,6 +192,21 @@ abstract class IntegrationOperation {
 
       @Override public String toString() {
         return trackPayload.toString();
+      }
+    };
+  }
+
+  static IntegrationOperation screen(final ScreenPayload screenPayload) {
+    return new IntegrationOperation() {
+      @Override
+      public void run(String key, Integration<?> integration, ProjectSettings projectSettings) {
+        if (isIntegrationEnabled(screenPayload.integrations(), key)) {
+          integration.screen(screenPayload);
+        }
+      }
+
+      @Override public String toString() {
+        return screenPayload.toString();
       }
     };
   }

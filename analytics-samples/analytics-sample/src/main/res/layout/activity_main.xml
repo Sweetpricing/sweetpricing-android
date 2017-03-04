@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
 <!--
   ~ The MIT License (MIT)
   ~
@@ -71,6 +72,12 @@
           android:text="@string/track_button_event"
           android:layout_width="match_parent"
           android:layout_height="wrap_content"/>
+
+      <Button
+        android:id="@+id/action_test_screen"
+        android:text="@string/test_screen"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"/>
 
   </LinearLayout>
 

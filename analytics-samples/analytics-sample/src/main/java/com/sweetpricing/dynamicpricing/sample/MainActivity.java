@@ -51,9 +51,9 @@ public class MainActivity extends Activity {
    * The following IDs are the product group ID and product ID configured
    * within Sweet Pricing.
    */
-  private static final int SP_STORE_ID = 3;
-  private static final int SP_1MONTH_ID = 7;
-  private static final int SP_1YEAR_ID = 8;
+  private static final int SP_STORE_ID = 5;
+  private static final int SP_1MONTH_ID = 33;
+  private static final int SP_1YEAR_ID = 3;
   private static final String DEFAULT_1MONTH = "com.sweetpricing.default.1month";
   private static final String DEFAULT_1YEAR = "com.sweetpricing.default.1year";
 
@@ -95,6 +95,11 @@ public class MainActivity extends Activity {
       @Override
       public void onClick(View v) {
         DynamicPricing.with(MainActivity.this).track("Logged In");
+      }
+    });
+    findViewById(R.id.action_test_screen).setOnClickListener(new View.OnClickListener() {
+      @Override public void onClick(View v) {
+        DynamicPricing.with(MainActivity.this).screen("Android", "Main Activity Screen");
       }
     });
   }

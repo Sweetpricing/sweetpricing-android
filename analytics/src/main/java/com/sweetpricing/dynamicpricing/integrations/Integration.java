@@ -70,6 +70,13 @@ public abstract class Integration<T> {
   public void track(TrackPayload track) {
   }
 
+  /**
+   * @see {@link DynamicPricing#screen(String, String, com.sweetpricing.dynamicpricing.Properties,
+   * com.sweetpricing.dynamicpricing.Options)}		
+   */
+  public void screen(ScreenPayload screen) {
+  }
+
   /** @see {@link DynamicPricing#flush()} */
   public void flush() {
   }

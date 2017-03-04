@@ -32,7 +32,7 @@ public class AnalyticsContextTest {
         .containsKey("app") //
         .containsKey("device") //
         .containsKey("library") //
-        .containsEntry("locale", "en-US") //
+        .containsKey("locale") //
         .containsKey("network") //
         .containsKey("os") //
         .containsKey("screen").containsEntry("userAgent", "undefined") //

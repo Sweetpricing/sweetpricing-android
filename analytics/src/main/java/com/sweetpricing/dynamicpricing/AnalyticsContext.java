@@ -36,10 +36,12 @@ import android.util.DisplayMetrics;
 import android.view.Display;
 import android.view.WindowManager;
 import com.sweetpricing.dynamicpricing.core.BuildConfig;
+import com.sweetpricing.dynamicpricing.integrations.Logger;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TimeZone;
+import java.util.concurrent.CountDownLatch;
 
 import static android.Manifest.permission.ACCESS_NETWORK_STATE;
 import static android.content.Context.CONNECTIVITY_SERVICE;
@@ -117,7 +119,7 @@ public class AnalyticsContext extends ValueMap {
    * instances is thread safe.
    */
   static synchronized AnalyticsContext create(Context context, Traits traits,
-                                              boolean collectDeviceId) {
+      boolean collectDeviceId) {
     AnalyticsContext analyticsContext =
         new AnalyticsContext(new NullableConcurrentHashMap<String, Object>());
     analyticsContext.putApp(context);
@@ -147,12 +149,17 @@ public class AnalyticsContext extends ValueMap {
     super(delegate);
   }
 
-  void attachAdvertisingId(Context context) {
+  void attachAdvertisingId(Context context, CountDownLatch latch, Logger logger) {
     // This is done as an extra step so we don't run into errors like this for testing
-    // http://pastebin.com/gyWJKWiu
+    // http://pastebin.com/gyWJKWiu.
     if (isOnClassPath("com.google.android.gms.ads.identifier.AdvertisingIdClient")) {
-      // this needs to be done each time since the settings may have been updated
-      new GetAdvertisingIdTask(this).execute(context);
+      // This needs to be done each time since the settings may have been updated.
+      new GetAdvertisingIdTask(this, latch, logger).execute(context);
+    } else {
+      logger.debug("Not collecting advertising ID because "
+          + "com.google.android.gms.ads.identifier.AdvertisingIdClient "
+          + "was not found on the classpath.");
+      latch.countDown();
     }
   }
 
@@ -411,7 +418,9 @@ public class AnalyticsContext extends ValueMap {
 
     /** Set the advertising information for this device. */
     void putAdvertisingInfo(String advertisingId, boolean adTrackingEnabled) {
-      put(DEVICE_ADVERTISING_ID_KEY, advertisingId);
+      if (adTrackingEnabled && !isNullOrEmpty(advertisingId)) {
+        put(DEVICE_ADVERTISING_ID_KEY, advertisingId);
+      }
       put(DEVICE_AD_TRACKING_ENABLED_KEY, adTrackingEnabled);
     }
 

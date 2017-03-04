@@ -3,6 +3,8 @@ package com.sweetpricing.dynamicpricing;
 import android.content.Context;
 import android.os.AsyncTask;
 import android.util.Pair;
+import com.sweetpricing.dynamicpricing.integrations.Logger;
+import java.util.concurrent.CountDownLatch;
 
 /**
  * An {@link AsyncTask} that fetches the advertising info and attaches it to the given {@link
@@ -11,9 +13,13 @@ import android.util.Pair;
 class GetAdvertisingIdTask extends AsyncTask<Context, Void, Pair<String, Boolean>> {
 
   final AnalyticsContext analyticsContext;
+  final CountDownLatch latch;
+  final Logger logger;
 
-  GetAdvertisingIdTask(AnalyticsContext analyticsContext) {
+  GetAdvertisingIdTask(AnalyticsContext analyticsContext, CountDownLatch latch, Logger logger) {
     this.analyticsContext = analyticsContext;
+    this.latch = latch;
+    this.logger = logger;
   }
 
   @Override protected Pair<String, Boolean> doInBackground(Context... contexts) {
@@ -26,20 +32,36 @@ class GetAdvertisingIdTask extends AsyncTask<Context, Void, Pair<String, Boolean
       Boolean isLimitAdTrackingEnabled = (Boolean) advertisingInfo.getClass()
           .getMethod("isLimitAdTrackingEnabled")
           .invoke(advertisingInfo);
-      String id = (String) advertisingInfo.getClass().getMethod("getId").invoke(advertisingInfo);
-      return Pair.create(id, isLimitAdTrackingEnabled);
-    } catch (Exception ignored) {
-      return null;
+
+      if (isLimitAdTrackingEnabled) {
+        logger.debug("Not collecting advertising ID because isLimitAdTrackingEnabled is true.");
+        return Pair.create(null, false);
+      }
+
+      String advertisingId =
+          (String) advertisingInfo.getClass().getMethod("getId").invoke(advertisingInfo);
+      return Pair.create(advertisingId, true);
+    } catch (Exception e) {
+      logger.error(e, "Unable to collect advertising ID.");
     }
+    return null;
   }
 
   @Override protected void onPostExecute(Pair<String, Boolean> info) {
     super.onPostExecute(info);
-    if (info != null) {
-      AnalyticsContext.Device device = analyticsContext.device();
-      if (device != null) {
-        device.putAdvertisingInfo(info.first, info.second);
+
+    try {
+      if (info == null) {
+        return;
       }
+      AnalyticsContext.Device device = analyticsContext.device();
+      if (device == null) {
+        logger.debug("Not collecting advertising ID because context.device is null.");
+        return;
+      }
+      device.putAdvertisingInfo(info.first, info.second);
+    } finally {
+      latch.countDown();
     }
   }
 }

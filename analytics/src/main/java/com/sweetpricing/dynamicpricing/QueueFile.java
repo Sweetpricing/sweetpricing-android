@@ -15,11 +15,10 @@
  */
 package com.sweetpricing.dynamicpricing;
 
-import android.util.Printer;
 import java.io.Closeable;
+import java.io.EOFException;
 import java.io.File;
 import java.io.FileNotFoundException;
-import java.io.IOError;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.RandomAccessFile;
@@ -50,8 +49,7 @@ import static java.lang.Math.min;
  *
  * @author Bob Lee (bob@squareup.com)
  */
-class QueueFile implements Closeable {
-
+public class QueueFile implements Closeable {
   private static final Logger LOGGER = Logger.getLogger(QueueFile.class.getName());
 
   /** Initial file size in bytes. */
@@ -109,7 +107,7 @@ class QueueFile implements Closeable {
    * Constructs a new queue backed by the given file. Only one instance should access a given file
    * at a time.
    */
-  QueueFile(File file) throws IOException {
+  public QueueFile(File file) throws IOException {
     if (!file.exists()) {
       initialize(file);
     }
@@ -271,7 +269,7 @@ class QueueFile implements Closeable {
    *
    * @param data to copy bytes from
    */
-  void add(byte[] data) throws IOException {
+  public void add(byte[] data) throws IOException {
     add(data, 0, data.length);
   }
 
@@ -284,7 +282,7 @@ class QueueFile implements Closeable {
    * @throws IndexOutOfBoundsException if {@code offset < 0} or {@code count < 0}, or if {@code
    * offset + count} is bigger than the length of {@code buffer}.
    */
-  synchronized void add(byte[] data, int offset, int count) throws IOException {
+  public synchronized void add(byte[] data, int offset, int count) throws IOException {
     if (data == null) {
       throw new NullPointerException("data == null");
     }
@@ -336,7 +334,7 @@ class QueueFile implements Closeable {
   }
 
   /** Returns true if this queue contains no entries. */
-  synchronized boolean isEmpty() {
+  public synchronized boolean isEmpty() {
     return elementCount == 0;
   }
 
@@ -357,6 +355,9 @@ class QueueFile implements Closeable {
     do {
       remainingBytes += previousLength;
       newLength = previousLength << 1;
+      if (newLength < previousLength) {
+        throw new EOFException("Cannot grow file beyond " + previousLength + " bytes");
+      }
       previousLength = newLength;
     } while (remainingBytes < elementLength);
 
@@ -396,7 +397,7 @@ class QueueFile implements Closeable {
   }
 
   /** Reads the eldest element. Returns null if the queue is empty. */
-  synchronized byte[] peek() throws IOException {
+  public synchronized byte[] peek() throws IOException {
     if (isEmpty()) return null;
     int length = first.length;
     byte[] data = new byte[length];
@@ -404,21 +405,15 @@ class QueueFile implements Closeable {
     return data;
   }
 
-  /** Invokes {@code visitor} with the eldest element, if an element is available. */
-  synchronized void peek(ElementVisitor visitor) throws IOException {
-    if (elementCount > 0) {
-      visitor.read(new ElementInputStream(first), first.length);
-    }
-  }
-
   /**
    * Invokes the given reader once for each element in the queue, from eldest to most recently
-   * added. Continues until all elements are read or {@link ElementVisitor#read reader.read()}
+   * added. Continues until all elements are read or {@link PayloadQueue.ElementVisitor#read
+   * reader.read()}
    * returns {@code false}.
    *
    * @return number of elements visited
    */
-  synchronized int forEach(ElementVisitor reader) throws IOException {
+  public synchronized int forEach(PayloadQueue.ElementVisitor reader) throws IOException {
     int position = first.position;
     for (int i = 0; i < elementCount; i++) {
       Element current = readElement(position);
@@ -431,36 +426,7 @@ class QueueFile implements Closeable {
     return elementCount;
   }
 
-  void dump(final Printer printer) {
-    printer.println("QueueFile file length: " + fileLength);
-    printer.println("QueueFile element count: " + elementCount);
-    printer.println("QueueFile first element: " + first);
-    printer.println("QueueFile last element: " + last);
-    try {
-      forEach(new ElementVisitor() {
-        int i = 1;
-        int position = first.position;
-
-        @Override public boolean read(InputStream in, int length) throws IOException {
-          printer.println("QueueFile element " + i + " length: " + length);
-          byte[] data = new byte[length];
-
-          ringRead(position + Element.HEADER_LENGTH, data, 0, length);
-          printer.println("QueueFile element " + i + " data: " + new String(data));
-
-          position = position + length;
-          i++;
-
-          return true;
-        }
-      });
-    } catch (IOException e) {
-      throw new IOError(e);
-    }
-  }
-
   private final class ElementInputStream extends InputStream {
-
     private int position;
     private int remaining;
 
@@ -494,7 +460,7 @@ class QueueFile implements Closeable {
   }
 
   /** Returns the number of elements in this queue. */
-  synchronized int size() {
+  public synchronized int size() {
     return elementCount;
   }
 
@@ -503,7 +469,7 @@ class QueueFile implements Closeable {
    *
    * @throws NoSuchElementException if the queue is empty
    */
-  synchronized void remove() throws IOException {
+  public synchronized void remove() throws IOException {
     remove(1);
   }
 
@@ -512,19 +478,23 @@ class QueueFile implements Closeable {
    *
    * @throws NoSuchElementException if the queue is empty
    */
-  synchronized void remove(int n) throws IOException {
-    if (isEmpty()) throw new NoSuchElementException();
-    if (n > elementCount) {
-      throw new IllegalArgumentException(
-          "Cannot remove more elements (" + n + ") than present in queue (" + elementCount + ").");
+  public synchronized void remove(int n) throws IOException {
+    if (isEmpty()) {
+      throw new NoSuchElementException();
     }
-    if (n < 1) {
-      throw new IllegalArgumentException(
-          "Cannot remove a non-positive (" + n + ") number of elements.");
+    if (n < 0) {
+      throw new IllegalArgumentException("Cannot remove negative (" + n + ") number of elements.");
+    }
+    if (n == 0) {
+      return;
     }
     if (n == elementCount) {
       clear();
       return;
+    }
+    if (n > elementCount) {
+      throw new IllegalArgumentException(
+          "Cannot remove more elements (" + n + ") than present in queue (" + elementCount + ").");
     }
 
     final int eraseStartPosition = first.position;
@@ -550,7 +520,7 @@ class QueueFile implements Closeable {
   }
 
   /** Clears this queue. Truncates the file to the initial size. */
-  synchronized void clear() throws IOException {
+  public synchronized void clear() throws IOException {
     // Commit the header.
     writeHeader(INITIAL_LENGTH, 0, 0, 0);
 
@@ -579,7 +549,7 @@ class QueueFile implements Closeable {
     builder.append(", last=").append(last);
     builder.append(", element lengths=[");
     try {
-      forEach(new ElementVisitor() {
+      forEach(new PayloadQueue.ElementVisitor() {
         boolean first = true;
 
         @Override public boolean read(InputStream in, int length) throws IOException {
@@ -601,7 +571,6 @@ class QueueFile implements Closeable {
 
   /** A pointer to an element. */
   static class Element {
-
     static final Element NULL = new Element(0, 0);
 
     /** Length of element header in bytes. */
@@ -633,24 +602,5 @@ class QueueFile implements Closeable {
           + length
           + "]";
     }
-  }
-
-  /**
-   * Reads queue elements. Enables partial reads as opposed to reading all of
-   * the bytes into a byte[].  Can opt to skip remaining elements.
-   */
-  interface ElementVisitor {
-
-    /**
-     * Called once per element.
-     *
-     * @param in stream of element data. Reads as many bytes as requested, unless fewer than the
-     * request number of bytes remains, in which case it reads all the remaining bytes. Not
-     * buffered.
-     * @param length of element data in bytes
-     * @return an indication whether the {@link #forEach} operation should continue; If
-     * {@code true}, continue, otherwise halt.
-     */
-    boolean read(InputStream in, int length) throws IOException;
   }
 }

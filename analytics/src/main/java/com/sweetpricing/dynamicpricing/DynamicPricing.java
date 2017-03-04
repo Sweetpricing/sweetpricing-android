@@ -29,7 +29,10 @@ import android.Manifest;
 import android.app.Activity;
 import android.app.Application;
 import android.content.Context;
+import android.content.SharedPreferences;
+import android.content.pm.ActivityInfo;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.os.Handler;
@@ -40,6 +43,7 @@ import com.sweetpricing.dynamicpricing.integrations.BasePayload;
 import com.sweetpricing.dynamicpricing.integrations.IdentifyPayload;
 import com.sweetpricing.dynamicpricing.integrations.Integration;
 import com.sweetpricing.dynamicpricing.integrations.Logger;
+import com.sweetpricing.dynamicpricing.integrations.ScreenPayload;
 import com.sweetpricing.dynamicpricing.integrations.TrackPayload;
 import com.sweetpricing.dynamicpricing.internal.Utils;
 import com.sweetpricing.dynamicpricing.internal.Utils.AnalyticsNetworkExecutorService;
@@ -50,16 +54,17 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static com.sweetpricing.dynamicpricing.internal.Utils.getResourceString;
+import static com.sweetpricing.dynamicpricing.internal.Utils.getSweetpricingSharedPreferences;
 import static com.sweetpricing.dynamicpricing.internal.Utils.hasPermission;
-import static com.sweetpricing.dynamicpricing.internal.Utils.isConnected;
 
 import static com.sweetpricing.dynamicpricing.internal.Utils.isNullOrEmpty;
-
 /**
  * The entry point into the Segment for Android SDK.
  * <p/>
@@ -85,10 +90,13 @@ public class DynamicPricing {
       throw new AssertionError("Unknown handler message received: " + msg.what);
     }
   };
+  private static final String OPT_OUT_PREFERENCE_KEY = "opt-out";
   static final String WRITE_KEY_RESOURCE_IDENTIFIER = "analytics_write_key";
   static final List<String> INSTANCES = new ArrayList<>(1);
   volatile static DynamicPricing singleton = null;
   private static final Properties EMPTY_PROPERTIES = new Properties();
+  private static final String VERSION_KEY = "version";
+  private static final String BUILD_KEY = "build";
 
   private final Application application;
   final ExecutorService networkExecutor;
@@ -106,7 +114,11 @@ public class DynamicPricing {
   private final String writeKey;
   final int flushQueueSize;
   final long flushIntervalInMillis;
+  // Retrieving the advertising ID is asynchronous. This latch helps us wait to ensure the
+  // advertising ID is ready.
+  final CountDownLatch advertisingIdLatch;
   final ExecutorService analyticsExecutor;
+  final BooleanPreference optOut;
 
   final Map<String, Boolean> bundledIntegrations = new ConcurrentHashMap<>();
   private List<Integration.Factory> factories;
@@ -170,9 +182,11 @@ public class DynamicPricing {
 
   DynamicPricing(Application application, ExecutorService networkExecutor, Stats stats,
                  Traits.Cache traitsCache, AnalyticsContext analyticsContext, Options defaultOptions,
-                 Logger logger, String tag, List<Integration.Factory> factories, Client client,
+                 Logger logger, String tag, final List<Integration.Factory> factories, Client client,
                  Cartographer cartographer, ProjectSettings.Cache projectSettingsCache, String writeKey,
-                 int flushQueueSize, long flushIntervalInMillis, final ExecutorService analyticsExecutor) {
+                 int flushQueueSize, long flushIntervalInMillis, final ExecutorService analyticsExecutor,
+                 final boolean shouldTrackApplicationLifecycleEvents, CountDownLatch advertisingIdLatch,
+                 final boolean shouldRecordScreenViews, BooleanPreference optOut) {
     this.application = application;
     this.networkExecutor = networkExecutor;
     this.stats = stats;
@@ -187,6 +201,8 @@ public class DynamicPricing {
     this.writeKey = writeKey;
     this.flushQueueSize = flushQueueSize;
     this.flushIntervalInMillis = flushIntervalInMillis;
+    this.advertisingIdLatch = advertisingIdLatch;
+    this.optOut = optOut;
     this.factories = Collections.unmodifiableList(factories);
     this.analyticsExecutor = analyticsExecutor;
 
@@ -207,12 +223,24 @@ public class DynamicPricing {
         });
       }
     });
+
+    logger.debug("Created analytics client for project with tag:%s.", tag);
+
     application.registerActivityLifecycleCallbacks(new Application.ActivityLifecycleCallbacks() {
+      final AtomicBoolean trackedApplicationLifecycleEvents = new AtomicBoolean(false);
+
       @Override public void onActivityCreated(Activity activity, Bundle savedInstanceState) {
+        if (!trackedApplicationLifecycleEvents.getAndSet(true)
+            && shouldTrackApplicationLifecycleEvents) {
+          trackApplicationLifecycleEvents();
+        }
         runOnMainThread(IntegrationOperation.onActivityCreated(activity, savedInstanceState));
       }
 
       @Override public void onActivityStarted(Activity activity) {
+        if (shouldRecordScreenViews) {
+          recordScreenViews(activity);
+        }
         runOnMainThread(IntegrationOperation.onActivityStarted(activity));
       }
 
@@ -236,8 +264,62 @@ public class DynamicPricing {
         runOnMainThread(IntegrationOperation.onActivityDestroyed(activity));
       }
     });
+  }
 
-    logger.debug("Created analytics client for project with tag:%s.", tag);
+  private void trackApplicationLifecycleEvents() {
+    // Get the current version.
+    PackageInfo packageInfo = getPackageInfo(application);
+    String currentVersion = packageInfo.versionName;
+    int currentBuild = packageInfo.versionCode;
+
+    // Get the previous recorded version.
+    SharedPreferences sharedPreferences = getSweetpricingSharedPreferences(application);
+    String previousVersion = sharedPreferences.getString(VERSION_KEY, null);
+    int previousBuild = sharedPreferences.getInt(BUILD_KEY, -1);
+
+    // Check and track Application Installed or Application Updated.
+    if (previousBuild == -1) {
+      track("Application Installed", new Properties() //
+          .putValue(VERSION_KEY, currentVersion).putValue(BUILD_KEY, currentBuild));
+    } else if (currentBuild != previousBuild) {
+      track("Application Updated", new Properties() //
+          .putValue(VERSION_KEY, currentVersion)
+          .putValue(BUILD_KEY, currentBuild)
+          .putValue("previous_" + VERSION_KEY, previousVersion)
+          .putValue("previous_" + BUILD_KEY, previousBuild));
+    }
+
+    // Track Application Started.
+    track("Application Started", new Properties() //
+        .putValue("version", currentVersion) //
+        .putValue("build", currentBuild));
+
+    // Update the recorded version.
+    SharedPreferences.Editor editor = sharedPreferences.edit();
+    editor.putString(VERSION_KEY, currentVersion);
+    editor.putInt(BUILD_KEY, currentBuild);
+    editor.apply();
+  }
+
+  static PackageInfo getPackageInfo(Context context) {
+    PackageManager packageManager = context.getPackageManager();
+    try {
+      return packageManager.getPackageInfo(context.getPackageName(), 0);
+    } catch (PackageManager.NameNotFoundException e) {
+      throw new AssertionError("Package not found: " + context.getPackageName());
+    }
+  }
+
+  private void recordScreenViews(Activity activity) {
+    PackageManager packageManager = activity.getPackageManager();
+    try {
+      ActivityInfo info =
+          packageManager.getActivityInfo(activity.getComponentName(), PackageManager.GET_META_DATA);
+      CharSequence activityLabel = info.loadLabel(packageManager);
+      screen(null, activityLabel.toString());
+    } catch (PackageManager.NameNotFoundException e) {
+      throw new AssertionError("Activity Not Found: " + e.toString());
+    }
   }
 
   private void runOnMainThread(final IntegrationOperation operation) {
@@ -294,7 +376,10 @@ public class DynamicPricing {
    * @throws IllegalArgumentException if both {@code userId} and {@code newTraits} are not provided
    * @see <a href="https://segment.com/docs/tracking-api/identify/">Identify Documentation</a>
    */
-  public void identify(String userId, Traits newTraits, Options options) {
+  public void identify(String userId, Traits newTraits, final Options options) {
+    if (shutdown) {
+      throw new IllegalStateException("Cannot enqueue messages after client is shutdown.");
+    }
     if (isNullOrEmpty(userId) && isNullOrEmpty(newTraits)) {
       throw new IllegalArgumentException("Either userId or some traits must be provided.");
     }
@@ -310,12 +395,21 @@ public class DynamicPricing {
     traitsCache.set(traits); // Save the new traits
     analyticsContext.setTraits(traits); // Update the references
 
-    if (options == null) {
-      options = defaultOptions;
-    }
+    analyticsExecutor.submit(new Runnable() {
+      @Override public void run() {
+        final Options finalOptions;
+        if (options == null) {
+          finalOptions = defaultOptions;
+        } else {
+          finalOptions = options;
+        }
 
-    IdentifyPayload payload = new IdentifyPayload(analyticsContext, options, traitsCache.get());
-    submit(payload);
+        waitForAdvertisingId();
+        IdentifyPayload payload =
+            new IdentifyPayload(analyticsContext, finalOptions, traitsCache.get());
+        enqueue(payload);
+      }
+    });
   }
 
   /**
@@ -372,25 +466,111 @@ public class DynamicPricing {
    * @throws IllegalArgumentException if event name is null or an empty string
    * @see <a href="https://segment.com/docs/tracking-api/track/">Track Documentation</a>
    */
-  public void track(String event, Properties properties, Options options) {
-    if (isNullOrEmpty(event)) {
-      throw new IllegalArgumentException("event must not be null or empty.");
-    }
-    if (properties == null) {
-      properties = EMPTY_PROPERTIES;
-    }
-    if (options == null) {
-      options = defaultOptions;
-    }
-
-    TrackPayload payload = new TrackPayload(analyticsContext, options, event, properties);
-    submit(payload);
-  }
-
-  void submit(BasePayload payload) {
+  public void track(final String event, final Properties properties, final Options options) {
     if (shutdown) {
       throw new IllegalStateException("Cannot enqueue messages after client is shutdown.");
     }
+    if (isNullOrEmpty(event)) {
+      throw new IllegalArgumentException("event must not be null or empty.");
+    }
+
+    analyticsExecutor.submit(new Runnable() {
+      @Override public void run() {
+        final Options finalOptions;
+        if (options == null) {
+          finalOptions = defaultOptions;
+        } else {
+          finalOptions = options;
+        }
+
+        final Properties finalProperties;
+        if (properties == null) {
+          finalProperties = EMPTY_PROPERTIES;
+        } else {
+          finalProperties = properties;
+        }
+
+        waitForAdvertisingId();
+        TrackPayload payload =
+            new TrackPayload(analyticsContext, finalOptions, event, finalProperties);
+        enqueue(payload);
+      }
+    });
+  }
+
+  /** @see #screen(String, String, Properties, Options) */
+  public void screen(String category, String name) {
+    screen(category, name, null, null);
+  }
+
+  /** @see #screen(String, String, Properties, Options) */
+  public void screen(String category, String name, Properties properties) {
+    screen(category, name, properties, null);
+  }
+
+  /**
+   * The screen methods let your record whenever a user sees a screen of your mobile app, and
+   * attach
+   * a name, category or properties to the screen.
+   * <p/>
+   * Either category or name must be provided.
+   *
+   * @param category A category to describe the screen
+   * @param name A name for the screen
+   * @param properties {@link Properties} to add extra information to this call
+   * @param options To configure the call
+   * @see <a href="http://segment.com/docs/tracking-api/page-and-screen/">Screen Documentation</a>
+   */
+   public void screen(final String category, final String name, final Properties properties,
+      final Options options) {
+    if (shutdown) {
+      throw new IllegalStateException("Cannot enqueue messages after client is shutdown.");
+    }
+    if (isNullOrEmpty(category) && isNullOrEmpty(name)) {
+      throw new IllegalArgumentException("either category or name must be provided.");
+    }
+
+    analyticsExecutor.submit(new Runnable() {
+      @Override public void run() {
+        final Options finalOptions;
+        if (options == null) {
+          finalOptions = defaultOptions;
+        } else {
+          finalOptions = options;
+        }
+
+        final Properties finalProperties;
+        if (properties == null) {
+          finalProperties = EMPTY_PROPERTIES;
+        } else {
+          finalProperties = properties;
+        }
+
+        waitForAdvertisingId();
+        ScreenPayload payload =
+            new ScreenPayload(analyticsContext, finalOptions, category, name, finalProperties);
+        enqueue(payload);
+      }
+    });
+  }
+
+  void waitForAdvertisingId() {
+    try {
+      advertisingIdLatch.await(15, TimeUnit.SECONDS);
+    } catch (InterruptedException e) {
+      logger.error(e, "Thread interrupted while waiting for advertising ID.");
+    }
+    if (advertisingIdLatch.getCount() == 1) {
+      logger.debug("Advertising ID may not be collected because the Advertising ID API did not "
+          + "respond within 15 seconds.");
+    }
+  }
+
+  void enqueue(BasePayload payload) {
+    if (optOut.get()) {
+      return;
+    }
+
     logger.verbose("Created payload %s.", payload);
     final IntegrationOperation operation;
     switch (payload.type()) {
@@ -400,10 +580,17 @@ public class DynamicPricing {
       case track:
         operation = IntegrationOperation.track((TrackPayload) payload);
         break;
+      case screen:
+        operation = IntegrationOperation.screen((ScreenPayload) payload);
+        break;
       default:
         throw new AssertionError("unknown type " + payload.type());
     }
-    runOnMainThread(operation);
+    HANDLER.post(new Runnable() {
+      @Override public void run() {
+        performRun(operation);
+      }
+    });
   }
 
   /**
@@ -463,6 +650,15 @@ public class DynamicPricing {
     traitsCache.set(Traits.create());
     analyticsContext.setTraits(traitsCache.get());
     runOnMainThread(IntegrationOperation.RESET);
+  }
+
+  /**
+   * Set the opt-out status for the current device and analytics client combination. This flag is
+   * persisted across device reboots, so you can simply call this once during your application
+   * (such as in a screen where a user can opt out of analytics tracking).
+   */
+  public void optOut(boolean optOut) {
+    this.optOut.set(optOut);
   }
 
   /**
@@ -595,6 +791,8 @@ public class DynamicPricing {
     private ExecutorService networkExecutor;
     private ConnectionFactory connectionFactory;
     private List<Integration.Factory> factories;
+    private boolean trackApplicationLifecycleEvents = false;
+    private boolean recordScreenViews = false;
 
     /** Start building a new {@link DynamicPricing} instance. */
     public Builder(Context context, String writeKey) {
@@ -656,7 +854,7 @@ public class DynamicPricing {
 
     /**
      * Enable or disable collection of {@link android.provider.Settings.Secure#ANDROID_ID},
-     * {@link android.os.Build#SERIAL} or the Telephony Identifier retreived via
+     * {@link android.os.Build#SERIAL} or the Telephony Identifier retrieved via
      * TelephonyManager as available. Collection of the device identifier is enabled by default.
      */
     public Builder collectDeviceId(boolean collect) {
@@ -750,6 +948,21 @@ public class DynamicPricing {
       return this;
     }
 
+    /**
+     * Automatically track application lifecycle events, including "Application Installed",
+     * "Application Updated" and "Application Opened".
+     */
+    public Builder trackApplicationLifecycleEvents() {
+      this.trackApplicationLifecycleEvents = true;
+      return this;
+    }
+
+    /** Automatically record screen calls when activities are created. */
+    public Builder recordScreenViews() {
+      this.recordScreenViews = true;
+      return this;
+    }
+
     /** Create a {@link DynamicPricing} client. */
     public DynamicPricing build() {
       if (isNullOrEmpty(tag)) {
@@ -780,29 +993,36 @@ public class DynamicPricing {
 
       final Stats stats = new Stats();
       final Cartographer cartographer = Cartographer.INSTANCE;
-      final Client client = new Client(application, writeKey, connectionFactory);
+      final Client client = new Client(writeKey, connectionFactory);
 
       ProjectSettings.Cache projectSettingsCache =
               new ProjectSettings.Cache(application, cartographer, tag);
 
+
+      BooleanPreference optOut =
+          new BooleanPreference(getSweetpricingSharedPreferences(application), OPT_OUT_PREFERENCE_KEY,
+              false);
 
       Traits.Cache traitsCache = new Traits.Cache(application, cartographer, tag);
       if (!traitsCache.isSet() || traitsCache.get() == null) {
         Traits traits = Traits.create();
         traitsCache.set(traits);
       }
+
+      Logger logger = Logger.with(logLevel);
       AnalyticsContext analyticsContext =
           AnalyticsContext.create(application, traitsCache.get(), collectDeviceID);
-      analyticsContext.attachAdvertisingId(application);
+      CountDownLatch advertisingIdLatch = new CountDownLatch(1);
+      analyticsContext.attachAdvertisingId(application, advertisingIdLatch, logger);
 
       List<Integration.Factory> factories = new ArrayList<>(1 + this.factories.size());
       factories.add(SweetpricingIntegration.FACTORY);
       factories.addAll(this.factories);
 
       return new DynamicPricing(application, networkExecutor, stats, traitsCache, analyticsContext,
-          defaultOptions, Logger.with(logLevel), tag, factories, client, cartographer,
-          projectSettingsCache, writeKey, flushQueueSize, flushIntervalInMillis,
-          Executors.newSingleThreadExecutor());
+          defaultOptions, logger, tag, factories, client, cartographer, projectSettingsCache,
+          writeKey, flushQueueSize, flushIntervalInMillis, Executors.newSingleThreadExecutor(),
+          trackApplicationLifecycleEvents, advertisingIdLatch, recordScreenViews, optOut);
     }
   }
 
@@ -810,18 +1030,20 @@ public class DynamicPricing {
   private static final long SETTINGS_RETRY_INTERVAL = 1000 * 60; // 1 minute
 
 
+  /**
+   * Retrieve settings from the cache or the network:
+   * 1. If the cache is empty, fetch new settings.
+   * 2. If the cache is not stale, use it.
+   * 2. If the cache is stale, try to get new settings.
+   */
   private ProjectSettings getSettings() {
     ProjectSettings settings = projectSettingsCache.get();
-
-    boolean update = false;
     if (isNullOrEmpty(settings)) {
-      update = true;
-    } else if (settings.timestamp() + SETTINGS_REFRESH_INTERVAL < System.currentTimeMillis()) {
-      update = true;
+      return null;
     }
 
-    if (update && isConnected(application)) {
-      settings = null;
+    if (settings.timestamp() + SETTINGS_REFRESH_INTERVAL < System.currentTimeMillis()) {
+      return settings;
     }
 
     return settings;

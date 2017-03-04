@@ -11,6 +11,8 @@ public class MainActivity extends Activity {
   @Override protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
 
+    WearAnalytics.with(this).screen("Viewed Main Activity (Wear)", null, null);
+
     setContentView(R.layout.activity_main);
 
     final WatchViewStub stub = (WatchViewStub) findViewById(R.id.watch_view_stub);

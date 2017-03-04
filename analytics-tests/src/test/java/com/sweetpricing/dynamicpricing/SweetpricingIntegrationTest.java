@@ -5,8 +5,8 @@ import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import com.sweetpricing.dynamicpricing.core.tests.BuildConfig;
 import com.sweetpricing.dynamicpricing.integrations.Logger;
-import com.sweetpricing.dynamicpricing.internal.Utils;
 import com.sweetpricing.dynamicpricing.integrations.TrackPayload;
+import com.sweetpricing.dynamicpricing.internal.Utils;
 import com.sweetpricing.dynamicpricing.test.TrackPayloadBuilder;
 import java.io.File;
 import java.io.IOError;
@@ -48,6 +48,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.verifyZeroInteractions;
 import static org.mockito.Mockito.when;
 import static org.mockito.MockitoAnnotations.initMocks;
@@ -75,21 +76,22 @@ public class SweetpricingIntegrationTest {
   }
 
   @Test public void enqueueAddsToQueueFile() throws IOException {
-    QueueFile queueFile = mock(QueueFile.class);
-    SweetpricingIntegration sweetpricingIntegration = new SweetpricingBuilder().queueFile(queueFile).build();
+    PayloadQueue payloadQueue = mock(PayloadQueue.class);
+    SweetpricingIntegration sweetpricingIntegration = new SweetpricingBuilder().payloadQueue(payloadQueue).build();
 
     sweetpricingIntegration.performEnqueue(TRACK_PAYLOAD);
 
-    verify(queueFile).add(TRACK_PAYLOAD_JSON.getBytes());
+    verify(payloadQueue).add(TRACK_PAYLOAD_JSON.getBytes());
   }
 
   @Test public void enqueueWritesIntegrations() throws IOException {
     final HashMap<String, Boolean> integrations = new LinkedHashMap<>();
     integrations.put("All", false); // should overwrite existing values in the map.
+    integrations.put("Sweetpricing", false); // should ignore Segment setting in payload.
     integrations.put("foo", true); // should add new values.
-    QueueFile queueFile = mock(QueueFile.class);
-    SweetpricingIntegration sweetpricingIntegration =
-        new SweetpricingBuilder().queueFile(queueFile).integrations(integrations).build();
+    PayloadQueue payloadQueue = mock(PayloadQueue.class);
+    SweetpricingIntegration sweetpricingIntegration = new SweetpricingBuilder() //
+        .payloadQueue(payloadQueue).integrations(integrations).build();
 
     AnalyticsContext analyticsContext = createContext(new Traits());
     TrackPayload trackPayload =
@@ -112,44 +114,44 @@ public class SweetpricingIntegrationTest {
         + "\"event\":\"foo\","
         + "\"properties\":{}"
         + "}";
-    verify(queueFile).add(expected.getBytes());
+    verify(payloadQueue).add(expected.getBytes());
   }
 
   @Test public void enqueueLimitsQueueSize() throws IOException {
-    QueueFile queueFile = mock(QueueFile.class);
+    PayloadQueue payloadQueue = mock(PayloadQueue.class);
     // we want to trigger a remove, but not a flush
-    when(queueFile.size()).thenReturn(0, MAX_QUEUE_SIZE, MAX_QUEUE_SIZE, 0);
-    SweetpricingIntegration sweetpricingIntegration = new SweetpricingBuilder().queueFile(queueFile).build();
+    when(payloadQueue.size()).thenReturn(0, MAX_QUEUE_SIZE, MAX_QUEUE_SIZE, 0);
+    SweetpricingIntegration sweetpricingIntegration = new SweetpricingBuilder().payloadQueue(payloadQueue).build();
 
     sweetpricingIntegration.performEnqueue(TRACK_PAYLOAD);
 
-    verify(queueFile).remove(); // oldest entry is removed
-    verify(queueFile).add(TRACK_PAYLOAD_JSON.getBytes()); // newest entry is added
+    verify(payloadQueue).remove(1); // oldest entry is removed
+    verify(payloadQueue).add(TRACK_PAYLOAD_JSON.getBytes()); // newest entry is added
   }
 
-  @Test public void exceptionThrownIfFailedToRemove() throws IOException {
-    QueueFile queueFile = mock(QueueFile.class);
-    doThrow(new IOException("no remove for you.")).when(queueFile).remove();
-    when(queueFile.size()).thenReturn(MAX_QUEUE_SIZE); // trigger a remove
-    SweetpricingIntegration sweetpricingIntegration = new SweetpricingBuilder().queueFile(queueFile).build();
+  @Test public void exceptionIgnoredIfFailedToRemove() throws IOException {
+    PayloadQueue payloadQueue = mock(PayloadQueue.class);
+    doThrow(new IOException("no remove for you.")).when(payloadQueue).remove(1);
+    when(payloadQueue.size()).thenReturn(MAX_QUEUE_SIZE); // trigger a remove
+    SweetpricingIntegration sweetpricingIntegration = new SweetpricingBuilder().payloadQueue(payloadQueue).build();
 
     try {
       sweetpricingIntegration.performEnqueue(TRACK_PAYLOAD);
-      fail("expected QueueFile to throw an error.");
-    } catch (IOError expected) {
-      assertThat(expected).hasMessage("java.io.IOException: no remove for you.");
-      assertThat(expected.getCause()).hasMessage("no remove for you.")
-          .isInstanceOf(IOException.class);
+    } catch (IOError unexpected) {
+      fail("did not expect QueueFile to throw an error.");
     }
+
+    verify(payloadQueue, never()).add(any(byte[].class));
   }
 
   @Test public void enqueueMaxTriggersFlush() throws IOException {
     QueueFile queueFile = new QueueFile(new File(folder.getRoot(), "queue-file"));
+    PayloadQueue payloadQueue = new PayloadQueue.PersistentQueue(queueFile);
     Client client = mock(Client.class);
     Client.Connection connection = mockConnection();
     when(client.upload()).thenReturn(connection);
-    SweetpricingIntegration sweetpricingIntegration =
-        new SweetpricingBuilder().client(client).flushSize(5).queueFile(queueFile).build();
+    SweetpricingIntegration sweetpricingIntegration = new SweetpricingBuilder() //
+        .client(client).flushSize(5).payloadQueue(payloadQueue).build();
 
     for (int i = 0; i < 4; i++) {
       sweetpricingIntegration.performEnqueue(TRACK_PAYLOAD);
@@ -163,10 +165,11 @@ public class SweetpricingIntegrationTest {
 
   @Test public void flushRemovesItemsFromQueue() throws IOException {
     QueueFile queueFile = new QueueFile(new File(folder.getRoot(), "queue-file"));
+    PayloadQueue payloadQueue = new PayloadQueue.PersistentQueue(queueFile);
     Client client = mock(Client.class);
     when(client.upload()).thenReturn(mockConnection());
-    SweetpricingIntegration sweetpricingIntegration =
-        new SweetpricingBuilder().client(client).queueFile(queueFile).build();
+    SweetpricingIntegration sweetpricingIntegration = new SweetpricingBuilder() //
+        .client(client).payloadQueue(payloadQueue).build();
     byte[] bytes = TRACK_PAYLOAD_JSON.getBytes();
     for (int i = 0; i < 4; i++) {
       queueFile.add(bytes);
@@ -179,10 +182,10 @@ public class SweetpricingIntegrationTest {
 
   @Test public void flushSubmitsToExecutor() throws IOException {
     ExecutorService executor = spy(new SynchronousExecutor());
-    QueueFile queueFile = mock(QueueFile.class);
-    when(queueFile.size()).thenReturn(1);
-    SweetpricingIntegration dispatcher =
-        new SweetpricingBuilder().queueFile(queueFile).networkExecutor(executor).build();
+    PayloadQueue payloadQueue = mock(PayloadQueue.class);
+    when(payloadQueue.size()).thenReturn(1);
+    SweetpricingIntegration dispatcher = new SweetpricingBuilder() //
+        .payloadQueue(payloadQueue).networkExecutor(executor).build();
 
     dispatcher.submitFlush();
 
@@ -206,12 +209,12 @@ public class SweetpricingIntegrationTest {
   }
 
   @Test public void flushWhenQueueSizeIsLessThanOneSkipsUpload() throws IOException {
-    QueueFile queueFile = mock(QueueFile.class);
-    when(queueFile.size()).thenReturn(0);
+    PayloadQueue payloadQueue = mock(PayloadQueue.class);
+    when(payloadQueue.size()).thenReturn(0);
     Context context = mockApplication();
     Client client = mock(Client.class);
-    SweetpricingIntegration sweetpricingIntegration =
-        new SweetpricingBuilder().queueFile(queueFile).context(context).client(client).build();
+    SweetpricingIntegration sweetpricingIntegration = new SweetpricingBuilder() //
+        .payloadQueue(payloadQueue).context(context).client(client).build();
 
     sweetpricingIntegration.submitFlush();
 
@@ -222,12 +225,15 @@ public class SweetpricingIntegrationTest {
   @Test public void flushDisconnectsConnection() throws IOException {
     Client client = mock(Client.class);
     QueueFile queueFile = new QueueFile(new File(folder.getRoot(), "queue-file"));
+    PayloadQueue payloadQueue = new PayloadQueue.PersistentQueue(queueFile);
     queueFile.add(TRACK_PAYLOAD_JSON.getBytes());
     HttpURLConnection urlConnection = mock(HttpURLConnection.class);
     Client.Connection connection = mockConnection(urlConnection);
     when(client.upload()).thenReturn(connection);
-    SweetpricingIntegration sweetpricingIntegration =
-        new SweetpricingBuilder().client(client).queueFile(queueFile).build();
+    SweetpricingIntegration sweetpricingIntegration = new SweetpricingBuilder() //
+        .client(client) //
+        .payloadQueue(payloadQueue) //
+        .build();
 
     sweetpricingIntegration.submitFlush();
 
@@ -235,21 +241,21 @@ public class SweetpricingIntegrationTest {
   }
 
   @Test public void serializationErrorSkipsAddingPayload() throws IOException {
-    QueueFile queueFile = mock(QueueFile.class);
+    PayloadQueue payloadQueue = mock(PayloadQueue.class);
     Cartographer cartographer = mock(Cartographer.class);
     TrackPayload payload = new TrackPayloadBuilder().build();
-    SweetpricingIntegration sweetpricingIntegration =
-        new SweetpricingBuilder().cartographer(cartographer).queueFile(queueFile).build();
+    SweetpricingIntegration sweetpricingIntegration = new SweetpricingBuilder() //
+        .cartographer(cartographer).payloadQueue(payloadQueue).build();
 
     // Serialized json is null.
     when(cartographer.toJson(anyMap())).thenReturn(null);
     sweetpricingIntegration.performEnqueue(payload);
-    verify(queueFile, never()).add((byte[]) any());
+    verify(payloadQueue, never()).add((byte[]) any());
 
     // Serialized json is empty.
     when(cartographer.toJson(anyMap())).thenReturn("");
     sweetpricingIntegration.performEnqueue(payload);
-    verify(queueFile, never()).add((byte[]) any());
+    verify(payloadQueue, never()).add((byte[]) any());
 
     // Serialized json is too large (> 15kb).
     StringBuilder stringBuilder = new StringBuilder();
@@ -258,21 +264,21 @@ public class SweetpricingIntegrationTest {
     }
     when(cartographer.toJson(anyMap())).thenReturn(stringBuilder.toString());
     sweetpricingIntegration.performEnqueue(payload);
-    verify(queueFile, never()).add((byte[]) any());
+    verify(payloadQueue, never()).add((byte[]) any());
 
     // Serializing json throws exception.
     doThrow(new IOException("mock")).when(cartographer).toJson(anyMap());
     sweetpricingIntegration.performEnqueue(payload);
-    verify(queueFile, never()).add((byte[]) any());
+    verify(payloadQueue, never()).add((byte[]) any());
   }
 
   @Test public void shutdown() throws IOException {
-    QueueFile queueFile = mock(QueueFile.class);
-    SweetpricingIntegration sweetpricingIntegration = new SweetpricingBuilder().queueFile(queueFile).build();
+    PayloadQueue payloadQueue = mock(PayloadQueue.class);
+    SweetpricingIntegration sweetpricingIntegration = new SweetpricingBuilder().payloadQueue(payloadQueue).build();
 
     sweetpricingIntegration.shutdown();
 
-    verify(queueFile).close();
+    verify(payloadQueue).close();
   }
 
   @Test public void payloadVisitorReadsOnly475KB() throws IOException {
@@ -348,7 +354,7 @@ public class SweetpricingIntegrationTest {
   private static class SweetpricingBuilder {
     Client client;
     Stats stats;
-    QueueFile queueFile;
+    PayloadQueue payloadQueue;
     Context context;
     Cartographer cartographer;
     Map<String, Boolean> integrations;
@@ -375,8 +381,8 @@ public class SweetpricingIntegrationTest {
       return this;
     }
 
-    public SweetpricingBuilder queueFile(QueueFile queueFile) {
-      this.queueFile = queueFile;
+    public SweetpricingBuilder payloadQueue(PayloadQueue payloadQueue) {
+      this.payloadQueue = payloadQueue;
       return this;
     }
 
@@ -423,12 +429,12 @@ public class SweetpricingIntegrationTest {
       }
       if (client == null) client = mock(Client.class);
       if (cartographer == null) cartographer = Cartographer.INSTANCE;
-      if (queueFile == null) queueFile = mock(QueueFile.class);
+      if (payloadQueue == null) payloadQueue = mock(PayloadQueue.class);
       if (stats == null) stats = mock(Stats.class);
       if (integrations == null) integrations = Collections.emptyMap();
       if (networkExecutor == null) networkExecutor = new SynchronousExecutor();
-      return new SweetpricingIntegration(context, client, cartographer, networkExecutor, queueFile, stats,
-          integrations, flushInterval, flushSize, logger);
+      return new SweetpricingIntegration(context, client, cartographer, networkExecutor, payloadQueue,
+          stats, integrations, flushInterval, flushSize, logger);
     }
   }
 }

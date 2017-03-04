@@ -6,25 +6,25 @@ import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.Message;
 import android.util.JsonWriter;
-import android.util.Printer;
-
 import com.sweetpricing.dynamicpricing.integrations.BasePayload;
 import com.sweetpricing.dynamicpricing.integrations.IdentifyPayload;
 import com.sweetpricing.dynamicpricing.integrations.Integration;
 import com.sweetpricing.dynamicpricing.integrations.Logger;
+import com.sweetpricing.dynamicpricing.integrations.ScreenPayload;
 import com.sweetpricing.dynamicpricing.integrations.TrackPayload;
 import com.sweetpricing.dynamicpricing.internal.Utils.AnalyticsThreadFactory;
 import java.io.BufferedWriter;
 import java.io.Closeable;
 import java.io.File;
-import java.io.IOError;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.nio.charset.Charset;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -54,26 +54,25 @@ class SweetpricingIntegration extends Integration<Void> {
     }
   };
 
-  static final String SWEETPRICING_KEY = "Sweetpricing";
-
   /**
    * Drop old payloads if queue contains more than 1000 items. Since each item can be at most
-   * 450KB, this bounds the queueFile size to ~450MB (ignoring headers), which also leaves room for
+   * 15KB, this bounds the queue size to ~15MB (ignoring headers), which also leaves room for
    * QueueFile's 2GB limit.
    */
   static final int MAX_QUEUE_SIZE = 1000;
-  /** Our servers only accept payloads < 15kb. */
-  static final int MAX_PAYLOAD_SIZE = 15000; // 15kb
+  /** Our servers only accept payloads < 15KB. */
+  static final int MAX_PAYLOAD_SIZE = 15000; // 15KB.
+  /**
+   * Our servers only accept batches < 500KB. This limit is 475KB to account for extra data
+   * that is not present in payloads themselves, but is added later, such as {@code sentAt},
+   * {@code integrations} and other json tokens.
+   */
+  private static final int MAX_BATCH_SIZE = 475000; // 475KB.
   private static final Charset UTF_8 = Charset.forName("UTF-8");
   private static final String SWEETPRICING_THREAD_NAME = THREAD_PREFIX + "SweetpricingDispatcher";
-  /**
-   * Our servers only accept batches < 500KB. This limit is 475kb to account for extra data
-   * that is not present in payloads themselves, but is added later, such as {@code sentAt},
-   * {@code integrations} and json tokens.
-   */
-  private static final int MAX_BATCH_SIZE = 475000; // 475kb
+  static final String SWEETPRICING_KEY = "Sweetpricing";
   private final Context context;
-  private final QueueFile queueFile;
+  private final PayloadQueue payloadQueue;
   private final Client client;
   private final int flushQueueSize;
   private final Stats stats;
@@ -135,25 +134,27 @@ class SweetpricingIntegration extends Integration<Void> {
       Cartographer cartographer, ExecutorService networkExecutor, Stats stats,
       Map<String, Boolean> bundledIntegrations, String tag, long flushIntervalInMillis,
       int flushQueueSize, Logger logger) {
-    QueueFile queueFile;
+    PayloadQueue payloadQueue;
     try {
       File folder = context.getDir("sweetpricing-disk-queue", Context.MODE_PRIVATE);
-      queueFile = createQueueFile(folder, tag);
+      QueueFile queueFile = createQueueFile(folder, tag);
+      payloadQueue = new PayloadQueue.PersistentQueue(queueFile);
     } catch (IOException e) {
-      throw new IOError(e);
+      logger.error(e, "Falling back to memory queue.");
+      payloadQueue = new PayloadQueue.MemoryQueue(new ArrayList<byte[]>());
     }
-    return new SweetpricingIntegration(context, client, cartographer, networkExecutor, queueFile,
+    return new SweetpricingIntegration(context, client, cartographer, networkExecutor, payloadQueue,
             stats, bundledIntegrations, flushIntervalInMillis, flushQueueSize, logger);
   }
 
   SweetpricingIntegration(Context context, Client client, Cartographer cartographer,
-      ExecutorService networkExecutor, QueueFile queueFile, Stats stats,
+      ExecutorService networkExecutor, PayloadQueue payloadQueue, Stats stats,
       Map<String, Boolean> bundledIntegrations, long flushIntervalInMillis, int flushQueueSize,
       Logger logger) {
     this.context = context;
     this.client = client;
     this.networkExecutor = networkExecutor;
-    this.queueFile = queueFile;
+    this.payloadQueue = payloadQueue;
     this.stats = stats;
     this.logger = logger;
     this.bundledIntegrations = bundledIntegrations;
@@ -165,7 +166,7 @@ class SweetpricingIntegration extends Integration<Void> {
     sweetpricingThread.start();
     handler = new SweetpricingDispatcherHandler(sweetpricingThread.getLooper(), this);
 
-    long initialDelay = queueFile.size() >= flushQueueSize ? 0L : flushIntervalInMillis;
+    long initialDelay = payloadQueue.size() >= flushQueueSize ? 0L : flushIntervalInMillis;
     flushScheduler.scheduleAtFixedRate(new Runnable() {
       @Override public void run() {
         flush();
@@ -181,29 +182,42 @@ class SweetpricingIntegration extends Integration<Void> {
     dispatchEnqueue(track);
   }
 
+  @Override public void screen(ScreenPayload screen) {
+    dispatchEnqueue(screen);
+  }
+
   private void dispatchEnqueue(BasePayload payload) {
     handler.sendMessage(handler.obtainMessage(SweetpricingDispatcherHandler.REQUEST_ENQUEUE,
             payload));
   }
 
-  void performEnqueue(BasePayload payload) {
+  void performEnqueue(BasePayload original) {
     // Override any user provided values with anything that was bundled.
     // e.g. If user did Mixpanel: true and it was bundled, this would correctly override it with
     // false so that the server doesn't send that event as well.
-    payload.integrations().putAll(bundledIntegrations);
+    ValueMap providedIntegrations = original.integrations();
+    LinkedHashMap<String, Object> combinedIntegrations =
+        new LinkedHashMap<>(providedIntegrations.size() + bundledIntegrations.size());
+    combinedIntegrations.putAll(providedIntegrations);
+    combinedIntegrations.putAll(bundledIntegrations);
+    combinedIntegrations.remove("Sweetpricing"); // don't include the Segment integration.
+    // Make a copy of the payload so we don't mutate the original.
+    ValueMap payload = new ValueMap();
+    payload.putAll(original);
+    payload.put("integrations", combinedIntegrations);
 
-    if (queueFile.size() >= MAX_QUEUE_SIZE) {
+    if (payloadQueue.size() >= MAX_QUEUE_SIZE) {
       synchronized (flushLock) {
         // Double checked locking, the network executor could have removed payload from the queue
         // to bring it below our capacity while we were waiting.
-        if (queueFile.size() >= MAX_QUEUE_SIZE) {
-          logger.info("Queue is at max capacity (%s), removing oldest payload.", queueFile.size());
+        if (payloadQueue.size() >= MAX_QUEUE_SIZE) {
+          logger.info("Queue is at max capacity (%s), removing oldest payload.",
+              payloadQueue.size());
           try {
-            queueFile.remove();
+            payloadQueue.remove(1);
           } catch (IOException e) {
-            throw new IOError(e);
-          } catch (ArrayIndexOutOfBoundsException e) {
-            dump(e, 1);
+            logger.error(e, "Unable to remove oldest payload from queue.");
+            return;
           }
         }
       }
@@ -214,13 +228,14 @@ class SweetpricingIntegration extends Integration<Void> {
       if (isNullOrEmpty(payloadJson) || payloadJson.length() > MAX_PAYLOAD_SIZE) {
         throw new IOException("Could not serialize payload " + payload);
       }
-      queueFile.add(payloadJson.getBytes(UTF_8));
+      payloadQueue.add(payloadJson.getBytes(UTF_8));
     } catch (IOException e) {
-      logger.error(e, "Could not add payload %s to queue: %s.", payload, queueFile);
+      logger.error(e, "Could not add payload %s to queue: %s.", payload, payloadQueue);
+      return;
     }
 
-    logger.verbose("Enqueued %s payload. %s elements in the queue.", payload, queueFile.size());
-    if (queueFile.size() >= flushQueueSize) {
+    logger.verbose("Enqueued %s payload. %s elements in the queue.", payload, payloadQueue.size());
+    if (payloadQueue.size() >= flushQueueSize) {
       submitFlush();
     }
   }
@@ -246,7 +261,7 @@ class SweetpricingIntegration extends Integration<Void> {
   }
 
   private boolean shouldFlush() {
-    return queueFile.size() > 0 && isConnected(context);
+    return payloadQueue.size() > 0 && isConnected(context);
   }
 
   /** Upload payloads to our servers and remove them from the queue file. */
@@ -258,80 +273,58 @@ class SweetpricingIntegration extends Integration<Void> {
 
     logger.verbose("Uploading payloads in queue to Sweetpricing.");
     int payloadsUploaded;
+
+    Client.Connection connection = null;
     try {
-      Client.Connection connection = null;
+      // Open a connection.
+      connection = client.upload();
+
+      // Write the payloads into the OutputStream.
+      BatchPayloadWriter writer = new BatchPayloadWriter(connection.os) //
+          .beginObject() //
+          .beginBatchArray();
+      PayloadWriter payloadWriter = new PayloadWriter(writer);
+      payloadQueue.forEach(payloadWriter);
+      writer.endBatchArray().endObject().close();
+      // Don't use the result of QueueFiles#forEach, since we may not read the last element.
+      payloadsUploaded = payloadWriter.payloadCount;
+
       try {
-        // Open a connection.
-        connection = client.upload();
-
-        // Write the payloads into the OutputStream.
-        BatchPayloadWriter writer =
-            new BatchPayloadWriter(connection.os).beginObject().beginBatchArray();
-        PayloadWriter payloadWriter = new PayloadWriter(writer);
-        queueFile.forEach(payloadWriter);
-        writer.endBatchArray().endObject().close();
-        // Don't use the result of QueueFiles#forEach, since we may not read the last element.
-        payloadsUploaded = payloadWriter.payloadCount;
-
-        try {
-          // Upload the payloads.
-          connection.close();
-        } catch (Client.UploadException e) {
-          // Simply log and proceed to remove the rejected payloads from the queue
-          logger.error(e, "Payloads were rejected by server. Marked for removal.");
-        }
-      } finally {
-        closeQuietly(connection);
+        // Upload the payloads.
+        connection.close();
+      } catch (Client.UploadException e) {
+        // Simply log and proceed to remove the rejected payloads from the queue.
+        logger.error(e, "Payloads were rejected by server. Marked for removal.");
       }
     } catch (IOException e) {
       logger.error(e, "Error while uploading payloads");
       return;
+    } finally {
+      closeQuietly(connection);
     }
 
     try {
-      queueFile.remove(payloadsUploaded);
+      payloadQueue.remove(payloadsUploaded);
     } catch (IOException e) {
-      IOException ioException = new IOException("Unable to remove " //
-          + payloadsUploaded + " payload(s) from queueFile: " + queueFile, e);
-      throw new IOError(ioException);
-    } catch (ArrayIndexOutOfBoundsException e) {
-      dump(e, payloadsUploaded);
+      logger.error(e, "Unable to remove " + payloadsUploaded + " payload(s) from queue.");
+      return;
     }
 
     logger.verbose("Uploaded %s payloads. %s remain in the queue.", payloadsUploaded,
-        queueFile.size());
+        payloadQueue.size());
     stats.dispatchFlush(payloadsUploaded);
-    if (queueFile.size() > 0) {
+    if (payloadQueue.size() > 0) {
       performFlush(); // Flush any remaining items.
     }
-  }
-
-  /**
-   * Log additional info for:
-   * 1. https://github.com/segmentio/analytics-android/issues/263
-   * 2. https://github.com/segmentio/analytics-android/issues/321
-   */
-  void dump(ArrayIndexOutOfBoundsException e, int count) {
-    logger.error(e, "Error while removing %s payload(s) from queue.", count);
-    try {
-      queueFile.dump(new Printer() {
-        @Override public void println(String x) {
-          logger.error(null, x);
-        }
-      });
-    } catch (ArrayIndexOutOfBoundsException expected) {
-      logger.error(expected, "Error while dumping contents of queue.");
-    }
-    throw new IOError(new IOException("Unable to remove " + count + " payload(s) from queue.", e));
   }
 
   void shutdown() {
     flushScheduler.shutdownNow();
     sweetpricingThread.quit();
-    closeQuietly(queueFile);
+    closeQuietly(payloadQueue);
   }
 
-  static class PayloadWriter implements QueueFile.ElementVisitor {
+  static class PayloadWriter implements PayloadQueue.ElementVisitor {
 
     final BatchPayloadWriter writer;
     int size;

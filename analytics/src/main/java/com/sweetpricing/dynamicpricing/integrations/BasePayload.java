@@ -119,7 +119,7 @@ public abstract class BasePayload extends ValueMap {
 
   /** @see #TYPE_KEY */
   public enum Type {
-    identify, variantRequest, track
+    identify, variantRequest, screen, track
   }
 
   /**

@@ -24,8 +24,8 @@ public class ConnectionFactory {
    */
   public HttpURLConnection upload(String writeKey) throws IOException {
     HttpURLConnection connection = openConnection("https://api.sweetpricing.com/v1/events");
-    connection.setRequestProperty("Content-Type", "application/json");
     connection.setRequestProperty("Authorization", authorizationHeader(writeKey));
+    connection.setRequestProperty("Content-Encoding", "gzip");
     connection.setDoOutput(true);
     connection.setChunkedStreamingMode(0);
     return connection;
@@ -35,8 +35,8 @@ public class ConnectionFactory {
   public HttpURLConnection variant(String writeKey) throws IOException {
     HttpURLConnection connection =
             openConnection("https://api.sweetpricing.com/v1/variant");
-    connection.setRequestProperty("Content-Type", "application/json");
     connection.setRequestProperty("Authorization", authorizationHeader(writeKey));
+    connection.setRequestProperty("Content-Encoding", "gzip");
     connection.setDoOutput(true);
     connection.setChunkedStreamingMode(0);
     return connection;
@@ -49,6 +49,7 @@ public class ConnectionFactory {
     HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
     connection.setConnectTimeout(DEFAULT_CONNECT_TIMEOUT_MILLIS);
     connection.setReadTimeout(DEFAULT_READ_TIMEOUT_MILLIS);
+    connection.setRequestProperty("Content-Type", "application/json");
     connection.setDoInput(true);
     return connection;
   }

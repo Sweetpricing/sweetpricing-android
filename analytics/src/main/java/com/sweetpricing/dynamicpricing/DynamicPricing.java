@@ -447,6 +447,23 @@ public class DynamicPricing {
     track("Purchase", props);
   }
 
+  /**
+   * Track a purchase of a particular product ID, along with the purchase data and signature for
+   * server-side verification.
+   *
+   * @param productId
+   * @param inappPurchaseData The RESPONSE_INAPP_PURCHASE_DATA part of the response.
+   * @param inappSignature The RESPONSE_INAPP_SIGNATURE part of the response.
+     */
+  public void trackPurchase(String productId, String inappPurchaseData, String inappSignature) {
+    Properties props = new Properties();
+    props.putProductId(productId);
+    props.putValue("purchaseData", inappPurchaseData);
+    props.putValue("signature", inappSignature);
+
+    track("Purchase", props);
+  }
+
   public void trackViewStore(Variant variant, List<Properties> products) {
     Properties props = new Properties();
     props.putVariantId(variant.getId());
